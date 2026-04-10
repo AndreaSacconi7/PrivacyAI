@@ -28,8 +28,17 @@ class ChatViewModel: ObservableObject {
     private var aliasToOriginal: [String: String] = [:]
     private var counters: [String: Int] = ["NOME": 1, "LUOGO": 1, "ORG": 1, "GENERIC": 1]
     
-    private let idToLabel: [Int: String] = [
-        0: "O", 1: "B-PER", 2: "I-PER", 3: "B-ORG", 4: "I-ORG", 5: "B-LOC", 6: "I-LOC", 7: "B-MISC", 8: "I-MISC"
+    // Se quella sopra non funziona, prova questa (Variante B):
+    let idToLabel: [Int: String] = [
+        0: "O",
+        1: "B-MISC",
+        2: "I-MISC",
+        3: "B-PER",
+        4: "I-PER",
+        5: "B-ORG",
+        6: "I-ORG",
+        7: "B-LOC",
+        8: "I-LOC"
     ]
     
     //Privacy overlay
@@ -63,7 +72,7 @@ class ChatViewModel: ObservableObject {
             }.value
             
             self.customDistilBERTModel = model
-            // self.tokenizer = try await AutoTokenizer.from(pretrained: "distilbert-base-multilingual-cased") // Scommenta se hai il tokenizer pronto
+            self.tokenizer = try await AutoTokenizer.from(pretrained: "distilbert-base-multilingual-cased") // Scommenta se hai il tokenizer pronto
             
             self.isAIReady = true
             print("✅ Intelligenza Artificiale Pronta!")
@@ -87,7 +96,7 @@ class ChatViewModel: ObservableObject {
         // restituisce un dizionario [Parola : Categoria]
         let aiResults = await runAllAIModels(on: text)
         
-        print("founded categories")
+        print("founded categories: ")
         // 3. Mappiamo i risultati dell'AI sui nostri token
         for i in 0..<newPendingMessage.tokens.count {
             let word = newPendingMessage.tokens[i].text
@@ -309,33 +318,165 @@ class ChatViewModel: ObservableObject {
         return restoredText
     }
     
-    // MARK: - Motore AI (Modificato per restituire un Dizionario Parola -> Categoria)
     private func runAllAIModels(on text: String) async -> [String: String] {
         var foundEntities: [String: String] = [:]
         
-        // 1. APPLE NLTagger
+        // 1. REGEX (Priorità Alta)
+        // Email, Telefoni, IBAN dovrebbero essere estratti qui.
+        //let regexEntities = extractPIIWithRegex(text: text)
+        //foundEntities.merge(regexEntities) { (current, _) in current }
+
+        /*
+        // 2. APPLE NLTagger (Veloce e ottimizzato per la lingua di sistema)
         let tagger = NLTagger(tagSchemes: [.nameType])
         tagger.string = text
         tagger.enumerateTags(in: text.startIndex..<text.endIndex, unit: .word, scheme: .nameType, options: [.joinNames, .omitWhitespace]) { tag, range in
             let word = String(text[range])
             if tag == .personalName { foundEntities[word] = "NOME" }
-            if tag == .placeName { foundEntities[word] = "LUOGO" }
+            else if tag == .placeName { foundEntities[word] = "LUOGO" }
+            //else if tag == .organizationName { }
             return true
-        }
+        }*/
         
-        // 2. DISTILBERT
+        // 3. DISTILBERT (Solo per ciò che manca o per conferma)
+        // Passa solo le parti di testo non ancora identificate se vuoi performance estreme,
+        // oppure usalo per arricchire i risultati.
         let distilBertEntities = extractEntitiesWithDistilBERT(text: text)
         for (word, category) in distilBertEntities {
-            foundEntities[word] = category
+            // Aggiungi solo se non abbiamo già identificato la parola con Regex/NLTagger
+            if foundEntities[word] == nil {
+                foundEntities[word] = category
+            }
         }
         
         return foundEntities
     }
     
+    // MARK: - 7. Estrattore DistilBERT
     private func extractEntitiesWithDistilBERT(text: String) -> [(String, String)] {
-        // Usa esattamente la tua funzione extractEntitiesWithDistilBERT originaria
-        // Qui restituirai il tuo array [(word, mappedCategory)]
-        return []
+        print("entrato su distilbert")
+        guard let tokenizer = self.tokenizer, let model = self.customDistilBERTModel else {
+            return []
+        }
+        
+        print("eseguo bert")
+        let maxLength = 128
+        let numberOfClasses = 9
+        let padTokenId: Int32 = 0
+        
+        // 1. Preparazione Input e Attention Mask
+        var tokenIds = tokenizer.encode(text: text).map { Int32($0) }
+        
+        // Aggiungi [CLS] (101) all'inizio se manca
+        /*if tokenIds.first != 101 {
+            tokenIds.insert(101, at: 0)
+        }
+
+        // Aggiungi [SEP] (102) alla fine (prima del padding) se manca
+        if tokenIds.last != 102 {
+            tokenIds.append(102)
+        }*/
+        
+        var attentionMask = Array(repeating: Int32(1), count: tokenIds.count)
+        
+        if tokenIds.count > maxLength {
+            tokenIds = Array(tokenIds.prefix(maxLength))
+            attentionMask = Array(attentionMask.prefix(maxLength))
+        } else {
+            let paddingCount = maxLength - tokenIds.count
+            tokenIds.append(contentsOf: Array(repeating: padTokenId, count: paddingCount))
+            attentionMask.append(contentsOf: Array(repeating: Int32(0), count: paddingCount))
+        }
+        
+        // 2. Creazione MLMultiArray
+        guard let inputIdsArray = try? MLMultiArray(shape: [1, NSNumber(value: maxLength)], dataType: .int32),
+              let attentionMaskArray = try? MLMultiArray(shape: [1, NSNumber(value: maxLength)], dataType: .int32) else {
+            print("❌ Errore: Impossibile allocare MLMultiArray")
+            return []
+        }
+        
+        // Scrittura veloce e sicura (perché gli array li abbiamo appena inizializzati noi come .int32 continui)
+        let inputIdsPointer = inputIdsArray.dataPointer.bindMemory(to: Int32.self, capacity: maxLength)
+        let attentionMaskPointer = attentionMaskArray.dataPointer.bindMemory(to: Int32.self, capacity: maxLength)
+        
+        for i in 0..<maxLength {
+            inputIdsPointer[i] = tokenIds[i]
+            attentionMaskPointer[i] = attentionMask[i]
+        }
+        
+        var foundEntities: [(String, String)] = []
+        
+        do {
+            // 3. Predizione
+            let predictionInput = DistilBERT_NER_MultilinguaInput(input_ids: inputIdsArray, attention_mask: attentionMaskArray)
+            let predictionOutput = try model.prediction(input: predictionInput)
+            
+            let outputTensor = predictionOutput.var_473
+            
+            var currentEntityTokenIds: [Int] = []
+            var currentCategory = ""
+            
+            let saveCurrentEntity = {
+                if !currentEntityTokenIds.isEmpty {
+                    let decodedString = tokenizer.decode(tokens: currentEntityTokenIds).trimmingCharacters(in: .whitespaces)
+                    foundEntities.append((decodedString, currentCategory))
+                    currentEntityTokenIds.removeAll()
+                }
+            }
+            
+            for i in 0..<maxLength {
+                if attentionMask[i] == 0 { break } // Salta il padding
+                
+                var maxScore: Float = -Float.greatestFiniteMagnitude
+                var bestClassIndex = 0
+                
+                // LETTURA SICURA: Usiamo il metodo nativo [NSNumber] che gestisce automaticamente gli Strides e il DataType
+                for classIndex in 0..<numberOfClasses {
+                    let pointer = [0, NSNumber(value: i), NSNumber(value: classIndex)]
+                    let score = outputTensor[pointer].floatValue
+                    
+                    if score > maxScore {
+                        maxScore = score
+                        bestClassIndex = classIndex
+                    }
+                }
+                
+                let label = idToLabel[bestClassIndex] ?? "O"
+                
+                // --- AGGIUNGI QUESTO PER DEBUG ---
+                if attentionMask[i] == 1 {
+                    let word = tokenizer.decode(tokens: [Int(tokenIds[i])])
+                    print("🧠 Token: '\(word)' | ID: \(tokenIds[i]) | Predizione: \(label) (Score: \(maxScore))")
+                }
+                // ---------------------------------
+                
+                if label.starts(with: "B-") {
+                    saveCurrentEntity()
+                    currentEntityTokenIds = [Int(tokenIds[i])]
+                    currentCategory = String(label.dropFirst(2))
+                } else if label.starts(with: "I-") {
+                    currentEntityTokenIds.append(Int(tokenIds[i]))
+                } else {
+                    saveCurrentEntity()
+                }
+            }
+            saveCurrentEntity()
+            
+        } catch {
+            print("❌ Errore predizione Core ML: \(error.localizedDescription)")
+        }
+        
+        // 4. Mappatura
+        return foundEntities.map { word, category in
+            let mappedCategory: String
+            switch category {
+            case "PER": mappedCategory = "NOME"
+            case "LOC": mappedCategory = "LUOGO"
+            case "ORG": mappedCategory = "ORG"
+            default: mappedCategory = "GENERIC"
+            }
+            return (word, mappedCategory)
+        }
     }
 }
 

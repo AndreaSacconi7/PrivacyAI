@@ -2,57 +2,78 @@ import SwiftUI
 
 @available(iOS 16.0, *)
 struct FlowLayout: Layout {
-    var spacing: CGFloat = 4 // Spazio tra una parola e l'altra
+    var spacing: CGFloat = 4
 
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let result = FlowResult(in: proposal.width ?? 300, subviews: subviews, spacing: spacing)
-        return result.size
+    // 1. CREIAMO LA CACHE: La memoria dove salveremo i calcoli per non ripeterli
+    struct CacheData {
+        var size: CGSize
+        var frames: [CGRect]
     }
 
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let result = FlowResult(in: bounds.width, subviews: subviews, spacing: spacing)
+    func makeCache(subviews: Subviews) -> CacheData {
+        CacheData(size: .zero, frames: [])
+    }
+
+    // 2. PRIMO STEP: SwiftUI chiede le dimensioni. Noi calcoliamo TUTTO e lo salviamo nella cache.
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout CacheData) -> CGSize {
+        // Prendiamo la larghezza proposta, se non c'è usiamo lo schermo
+        let maxWidth = proposal.width ?? UIScreen.main.bounds.width
+        
+        // Eseguiamo il motore matematico UNA SOLA VOLTA e salviamo il risultato in "cache"
+        cache = calculateFrames(maxWidth: maxWidth, subviews: subviews)
+        
+        return cache.size
+    }
+
+    // 3. SECONDO STEP: SwiftUI ci dice di disegnare. Noi piazziamo le parole usando la cache!
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout CacheData) {
         for (index, subview) in subviews.enumerated() {
-            let point = CGPoint(x: bounds.minX + result.frames[index].minX,
-                                y: bounds.minY + result.frames[index].minY)
-            subview.place(at: point, proposal: ProposedViewSize(result.frames[index].size))
+            if index < cache.frames.count {
+                let frame = cache.frames[index]
+                
+                // Calcoliamo il punto esatto basandoci SOLO sui dati salvati
+                let point = CGPoint(
+                    x: bounds.minX + frame.minX,
+                    y: bounds.minY + frame.minY
+                )
+                
+                // Piazziamo la parola dandole la sua dimensione naturale
+                subview.place(at: point, proposal: .unspecified)
+            }
         }
     }
 
-    // Motore interno per calcolare dove posizionare le parole
-    struct FlowResult {
-        var size: CGSize = .zero
+    // MARK: - Il tuo Motore Matematico (Isolato e Sicuro)
+    private func calculateFrames(maxWidth: CGFloat, subviews: Subviews) -> CacheData {
+        var currentX: CGFloat = 0
+        var currentY: CGFloat = 0
+        var lineHeight: CGFloat = 0
+        var maxUsedWidth: CGFloat = 0
         var frames: [CGRect] = []
 
-        init(in maxWidth: CGFloat, subviews: Layout.Subviews, spacing: CGFloat) {
-            var currentX: CGFloat = 0
-            var currentY: CGFloat = 0
-            var lineHeight: CGFloat = 0
-            
-            // 👇 1. Creiamo una variabile per memorizzare la LARGHEZZA REALE
-            var maxUsedWidth: CGFloat = 0
+        for subview in subviews {
+            // Chiediamo alla parola la sua grandezza naturale
+            let subviewSize = subview.sizeThatFits(.unspecified)
 
-            for subview in subviews {
-                let subviewSize = subview.sizeThatFits(.unspecified)
-                
-                // Se la parola sfora la larghezza massima, mandiamo a capo
-                if currentX + subviewSize.width > maxWidth && currentX > 0 {
-                    currentX = 0
-                    currentY += lineHeight + spacing
-                    lineHeight = 0
-                }
-                
-                frames.append(CGRect(x: currentX, y: currentY, width: subviewSize.width, height: subviewSize.height))
-                
-                // 👇 2. Salviamo il punto più a destra raggiunto dalla parola
-                let rightEdge = currentX + subviewSize.width
-                maxUsedWidth = max(maxUsedWidth, rightEdge)
-                
-                currentX += subviewSize.width + spacing
-                lineHeight = max(lineHeight, subviewSize.height)
+            // Se la parola è troppo lunga per questa riga, a capo!
+            if currentX + subviewSize.width > maxWidth && currentX > 0 {
+                currentX = 0
+                currentY += lineHeight + spacing
+                lineHeight = 0
             }
-            
-            // 👇 3. RESTITUIAMO LA LARGHEZZA REALE invece di maxWidth!
-            size = CGSize(width: maxUsedWidth, height: currentY + lineHeight)
+
+            // Salviamo il rettangolo esatto per questa parola
+            frames.append(CGRect(x: currentX, y: currentY, width: subviewSize.width, height: subviewSize.height))
+
+            // Aggiorniamo i contatori
+            let rightEdge = currentX + subviewSize.width
+            maxUsedWidth = max(maxUsedWidth, rightEdge)
+
+            currentX += subviewSize.width + spacing
+            lineHeight = max(lineHeight, subviewSize.height)
         }
+
+        let totalSize = CGSize(width: maxUsedWidth, height: currentY + lineHeight)
+        return CacheData(size: totalSize, frames: frames)
     }
 }

@@ -23,6 +23,8 @@ struct InteractiveWordView: View {
                 .background(backgroundColor)
                 .cornerRadius(6)
                 .foregroundColor(textColor)
+                .lineLimit(1) // Vietato andare a capo su se stessa
+                .fixedSize(horizontal: true, vertical: false)
         }
     }
     
