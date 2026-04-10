@@ -20,7 +20,7 @@ class ChatViewModel: ObservableObject {
     
     // MARK: - Proprietà AI & Privacy
     @Published var isAIReady: Bool = false
-    private var customDistilBERTModel: DistilBERT_NER_Multilingua?
+    private var customDistilBERTModel: BertBase_NER_Uncased_EN_120MB?
     private var tokenizer: Tokenizer? // Assicurati di avere la classe Tokenizer nel progetto
     
     // Il "Caveau" dei Dati Sensibili
@@ -67,17 +67,23 @@ class ChatViewModel: ObservableObject {
     func setupAI() async {
         guard !isAIReady else { return }
         do {
+            // 1. Carica il modello Core ML a 8-bit compresso localmente
             let model = try await Task.detached(priority: .userInitiated) {
-                try DistilBERT_NER_Multilingua(configuration: MLModelConfiguration())
+                try BertBase_NER_Uncased_EN_120MB(configuration: MLModelConfiguration())
             }.value
             
             self.customDistilBERTModel = model
-            self.tokenizer = try await AutoTokenizer.from(pretrained: "distilbert-base-multilingual-cased") // Scommenta se hai il tokenizer pronto
+            
+            // 2. Chiede a Swift di collegarsi a Internet e scaricare il Tokenizer
+            print("⏳ Download del Tokenizer da Internet in corso...")
+            // Scarica il tokenizer modernizzato, a prova di crash su iOS!
+            self.tokenizer = try await AutoTokenizer.from(pretrained: "Xenova/bert-base-uncased")
             
             self.isAIReady = true
-            print("✅ Intelligenza Artificiale Pronta!")
+            print("✅ Intelligenza Artificiale e Tokenizer pronti!")
+            
         } catch {
-            print("❌ Errore caricamento AI: \(error)")
+            print("❌ Errore caricamento AI o Tokenizer: \(error)")
         }
     }
     
@@ -366,7 +372,8 @@ class ChatViewModel: ObservableObject {
         
         // 1. Preparazione Input e Attention Mask
         var tokenIds = tokenizer.encode(text: text).map { Int32($0) }
-        
+        /*let testoMinuscolo = text.lowercased()
+        var tokenIds = tokenizer.encode(text: testoMinuscolo).map { Int32($0) }*/
         // Aggiungi [CLS] (101) all'inizio se manca
         /*if tokenIds.first != 101 {
             tokenIds.insert(101, at: 0)
@@ -408,10 +415,10 @@ class ChatViewModel: ObservableObject {
         
         do {
             // 3. Predizione
-            let predictionInput = DistilBERT_NER_MultilinguaInput(input_ids: inputIdsArray, attention_mask: attentionMaskArray)
+            let predictionInput = BertBase_NER_Uncased_EN_120MBInput(input_ids: inputIdsArray, attention_mask: attentionMaskArray)
             let predictionOutput = try model.prediction(input: predictionInput)
             
-            let outputTensor = predictionOutput.var_473
+            let outputTensor = predictionOutput.var_1004
             
             var currentEntityTokenIds: [Int] = []
             var currentCategory = ""
