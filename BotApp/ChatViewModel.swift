@@ -107,12 +107,15 @@ class ChatViewModel: ObservableObject {
         for i in 0..<newPendingMessage.tokens.count {
             let word = newPendingMessage.tokens[i].text
             
-            // Puliamo la parola da punteggiatura per il confronto (es: "Roma," -> "Roma")
+            // Puliamo la parola da punteggiatura
             let cleanWord = word.trimmingCharacters(in: .punctuationCharacters)
+            
+            // 💡 IL FIX: Abbassiamo le maiuscole solo per "bussare" al dizionario AI
+            let wordForSearch = cleanWord.lowercased()
         
-            if let categoryFoundByAI = aiResults[cleanWord] {
+            if let categoryFoundByAI = aiResults[wordForSearch] {
                 // Se l'AI ha trovato una corrispondenza, assegniamo la categoria al token
-                print(categoryFoundByAI)
+                print("Trovato match perfetto per: \(word) -> \(categoryFoundByAI)")
                 newPendingMessage.tokens[i].category = categoryFoundByAI
             }
         }
@@ -348,6 +351,7 @@ class ChatViewModel: ObservableObject {
         // Passa solo le parti di testo non ancora identificate se vuoi performance estreme,
         // oppure usalo per arricchire i risultati.
         let distilBertEntities = extractEntitiesWithDistilBERT(text: text)
+        print(distilBertEntities)
         for (word, category) in distilBertEntities {
             // Aggiungi solo se non abbiamo già identificato la parola con Regex/NLTagger
             if foundEntities[word] == nil {
@@ -423,25 +427,16 @@ class ChatViewModel: ObservableObject {
             var currentEntityTokenIds: [Int] = []
             var currentCategory = ""
             
-            let saveCurrentEntity = {
-                if !currentEntityTokenIds.isEmpty {
-                    let decodedString = tokenizer.decode(tokens: currentEntityTokenIds).trimmingCharacters(in: .whitespaces)
-                    foundEntities.append((decodedString, currentCategory))
-                    currentEntityTokenIds.removeAll()
-                }
-            }
-            
             for i in 0..<maxLength {
                 if attentionMask[i] == 0 { break } // Salta il padding
                 
                 var maxScore: Float = -Float.greatestFiniteMagnitude
                 var bestClassIndex = 0
                 
-                // LETTURA SICURA: Usiamo il metodo nativo [NSNumber] che gestisce automaticamente gli Strides e il DataType
+                // LETTURA SICURA
                 for classIndex in 0..<numberOfClasses {
                     let pointer = [0, NSNumber(value: i), NSNumber(value: classIndex)]
                     let score = outputTensor[pointer].floatValue
-                    
                     if score > maxScore {
                         maxScore = score
                         bestClassIndex = classIndex
@@ -450,28 +445,45 @@ class ChatViewModel: ObservableObject {
                 
                 let label = idToLabel[bestClassIndex] ?? "O"
                 
-                // --- AGGIUNGI QUESTO PER DEBUG ---
-                if attentionMask[i] == 1 {
-                    let word = tokenizer.decode(tokens: [Int(tokenIds[i])])
-                    print("🧠 Token: '\(word)' | ID: \(tokenIds[i]) | Predizione: \(label) (Score: \(maxScore))")
-                }
-                // ---------------------------------
-                
+                // LA LOGICA APPIATTITA (Senza Closure)
                 if label.starts(with: "B-") {
-                    saveCurrentEntity()
+                    // 1. Se c'era già un'entità in memoria, salvala prima di iniziare quella nuova!
+                    if !currentEntityTokenIds.isEmpty {
+                        let decodedString = tokenizer.decode(tokens: currentEntityTokenIds).trimmingCharacters(in: .whitespacesAndNewlines)
+                        foundEntities.append((decodedString, currentCategory))
+                    }
+                    
+                    // 2. Inizia a tracciare la nuova entità
                     currentEntityTokenIds = [Int(tokenIds[i])]
                     currentCategory = String(label.dropFirst(2))
+                    
                 } else if label.starts(with: "I-") {
+                    // È il pezzo successivo di un nome (es. il cognome)
                     currentEntityTokenIds.append(Int(tokenIds[i]))
+                    
                 } else {
-                    saveCurrentEntity()
+                    // È una parola normale ("O"). Se avevamo un'entità in sospeso, salviamola!
+                    if !currentEntityTokenIds.isEmpty {
+                        let decodedString = tokenizer.decode(tokens: currentEntityTokenIds).trimmingCharacters(in: .whitespacesAndNewlines)
+                        foundEntities.append((decodedString, currentCategory))
+                        currentEntityTokenIds.removeAll() // Svuota per la prossima
+                    }
                 }
             }
-            saveCurrentEntity()
+            
+            // FINE DEL LOOP: Salva l'ultimissima entità se la frase finisce proprio con un nome
+            if !currentEntityTokenIds.isEmpty {
+                let decodedString = tokenizer.decode(tokens: currentEntityTokenIds).trimmingCharacters(in: .whitespacesAndNewlines)
+                foundEntities.append((decodedString, currentCategory))
+            }
             
         } catch {
             print("❌ Errore predizione Core ML: \(error.localizedDescription)")
         }
+        
+        // --- PRINT DI CONTROLLO FINALE ---
+        print("🎯 Entità estratte prima della mappatura: \(foundEntities)")
+        // ---------------------------------
         
         // 4. Mappatura
         return foundEntities.map { word, category in
