@@ -4,13 +4,24 @@
 
 PrivacyAI is an iOS chat client that sits between you and cloud LLMs (OpenAI, Anthropic, Google Gemini, Groq). Before a message leaves the device, an **on-device BERT NER model running on Core ML** finds personal information (names, places, organizations) and replaces it with placeholders. The LLM only ever sees the pseudonymized text. When the answer comes back, the app swaps the real values back in, so the conversation still reads naturally to you.
 
-> 📸 _Add screenshots / a short screen recording here (review screen, chat, "What the AI saw" panel)._
+<p align="center">
+  <img src="docs/screenshots/compose.png" alt="Typing a message that mentions a person, a company and a city" width="260">
+  <img src="docs/screenshots/reply.png" alt="The sent message with the detected names highlighted, and the reply with real names restored" width="260">
+  <img src="docs/screenshots/what-the-ai-saw.png" alt="The same reply as the LLM wrote it, with placeholders" width="260">
+</p>
 
 ---
 
 ## Why
 
 People paste emails, contracts and medical notes into chatbots every day. Once that text reaches a third-party API, you no longer control it. PrivacyAI keeps the useful part (the LLM's reasoning) and keeps the sensitive part (who, where, which company) on your phone.
+
+## Demo
+
+<p align="center">
+  <img src="docs/demo.gif" alt="Demo: typing a message, reviewing the detected entities, reading the reply and opening What the AI saw" width="250"><br>
+  <sub><a href="https://github.com/user-attachments/assets/58619d04-20ab-4703-93d1-8d9ad2669588">▶ Watch the full-quality video</a></sub>
+</p>
 
 ## How it works
 
@@ -24,13 +35,41 @@ flowchart LR
     F --> G[Answer shown to user]
 ```
 
-**Example.** You type:
+### Example
 
-> Write an email to Mario Rossi at Microsoft saying I'll be in Seattle next week.
+**You type:**
 
-The LLM receives:
+> Write a short email to Mario Rossi at Microsoft saying I'll be in Seattle next week
 
-> Write an email to [PERSON_1] at [ORG_1] saying I'll be in [LOCATION_1] next week.
+**The LLM receives** (this is all that leaves the device):
+
+> Write a short email to [PERSON_1] at [ORG_1] saying I'll be in [LOCATION_1] next week
+
+**The LLM replies** (real output):
+
+> Subject: Quick Update – I'll Be in [LOCATION_1] Next Week
+>
+> Hi [PERSON_1],
+>
+> I wanted to let you know that I'll be in [LOCATION_1] next week. Please let me know if you'd like to catch up while I'm there.
+>
+> Best,<br>
+> [Your Name]
+
+**You see** (placeholders restored on-device):
+
+> Subject: Quick Update – I'll Be in Seattle Next Week
+>
+> Hi Mario Rossi,
+>
+> I wanted to let you know that I'll be in Seattle next week. Please let me know if you'd like to catch up while I'm there.
+>
+> Best,<br>
+> [Your Name]
+
+`[Your Name]` is the LLM's own template placeholder, not one of the app's: only aliases the app created are replaced.
+
+### Pipeline
 
 1. **Detect.** The message is tokenized with a bundled WordPiece tokenizer and run through a BERT token-classification model ([`dslim/bert-base-NER-uncased`](https://huggingface.co/dslim/bert-base-NER-uncased), converted to Core ML with int8 weights, ~105 MB). Sub-word pieces are merged back into words and BIO labels (`B-PER`, `I-PER`, `B-LOC`, …) are grouped into entities. Messages longer than the model's 128-token window are split on word boundaries.
 2. **Review.** Before sending, you see the message with every detected entity highlighted. Tap any word to add, change or remove a tag. The model suggests, you decide.
@@ -109,6 +148,8 @@ This downloads `dslim/bert-base-NER-uncased`, converts it to Core ML, quantizes 
 ### 2. Run
 
 Open `PrivacyAI.xcodeproj`, select a simulator or device and press **Run**. Swift Package Manager resolves `swift-transformers` on the first build. Press **⌘U** to run the tests.
+
+To run on a physical device, select your own team and a unique bundle identifier under **PrivacyAI target → Signing & Capabilities**.
 
 ### 3. Add your API key
 
