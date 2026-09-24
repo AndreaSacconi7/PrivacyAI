@@ -1,3 +1,22 @@
+# macOS
+.DS_Store
+
+# Xcode
+xcuserdata/
+DerivedData/
+build/
+
+# Core ML models: too large for git, build them with ml/convert_bert_ner.py
 *.mlmodelc
 *.mlmodel
 *.mlpackage
+ml/models/
+
+# Python
+__pycache__/
+.venv/
+
+# Local secrets. The app never needs a key at build time: it is entered in Settings.
+.env
+.env.*
+*.xcconfig.local
