@@ -58,7 +58,7 @@ struct SettingsView: View {
 
                 Section("About") {
                     LabeledContent("Version", value: Self.appVersion)
-                    Link(destination: URL(string: "https://github.com/AndreaSacconi7/PrivacyAI_app")!) {
+                    Link(destination: URL(string: "https://github.com/AndreaSacconi7/PrivacyAI")!) {
                         Label("Source code", systemImage: "chevron.left.forwardslash.chevron.right")
                     }
                 }
